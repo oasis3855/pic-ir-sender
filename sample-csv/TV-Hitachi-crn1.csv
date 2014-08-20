@@ -1,3 +1,4 @@
+@title = HITACHI TV
 power = 0A,F5,E8,17,
 display-info = 0A,F5,08,F7,
 audio-ch = 0A,F5,10,EF,

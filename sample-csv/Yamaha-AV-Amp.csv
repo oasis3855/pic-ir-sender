@@ -1,4 +1,5 @@
 @timing = 9000,4500,560,1690,560
+@title = YAMAHA AV Amp
 Power = 7E,81,54,AB,
 HDMI 1 = 5E,A1,E2,1C,
 HDMI 2 = 5E,A1,52,AC,

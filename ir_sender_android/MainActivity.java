@@ -1,12 +1,23 @@
-package com.example.android_bluetooth_ir_sender_01;
+package com.example.android_bluetooth_ir_sender_02;
 
 // IR Sender, Android Client
 // (C) INOUE Hirokazu
 // GNU GPL Free Software
 //
 // Version 0.1   2014/08/16
+// Version 0.2   2014/08/20
 
-import android.R.integer;
+import java.io.BufferedReader;
+import java.io.FileInputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.util.ArrayList;
+import java.util.Set;
+import java.util.UUID;
+
+import android.support.v7.app.ActionBarActivity;
+import android.support.v7.app.ActionBar;
+import android.support.v4.app.Fragment;
 import android.app.Activity;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
@@ -17,33 +28,27 @@ import android.view.LayoutInflater;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
+import android.view.ViewGroup;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.ListView;
 import android.widget.Toast;
 import android.os.Build;
 
-import java.io.BufferedReader;
-import java.io.FileInputStream;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.io.OutputStream;
-import java.util.ArrayList;
-import java.util.Set;
-import java.util.UUID;
-
-
-public class MainActivity extends Activity {
+public class MainActivity extends ActionBarActivity {
 
     BluetoothAdapter mBluetoothAdapter = null;
     BluetoothDevice mBluetoothDevice = null;
     BluetoothSocket mBluetoothSocket = null;
+    ListView listView_Codes = null;
     ArrayList<String> arrayKey = new ArrayList<String>();   // リモコンのボタン名
     ArrayList<String> arrayData = new ArrayList<String>();  // 送信データ
+    // @timing/@paramの初期値はここではなく Init_Param_and_Timing() で設定される
     byte[] byteTiming = {90, 45, 28, 84, 28};               // 各信号の持続時間 (St-hi*100, St-lo*100, 1/0-hi*20, 1-lo*20, 0-lo*20)
     byte[] byteParam = {0x01, 0x19, 0x08};                  // 制御 (mode 1:normal 2:pwm test 4:signal test, PR2, CCPR1L) 
     final int REQUEST_ENABLE_BLUETOOTH = 0x1010;    // BluetoothAdapter.ACTION_REQUEST_ENABLE の識別用
     final int REQUEST_FILE_SELECT = 0x1020;         // Intent.ACTION_GET_CONTENT の識別用
+    long time_last_sent = 0;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -90,6 +95,13 @@ public class MainActivity extends Activity {
                 String path = data.getData().getPath();
                 Toast.makeText(MainActivity.this, "CSV = " + path, Toast.LENGTH_LONG).show();
                 Read_csv_Data(path);
+                if(listView_Codes != null){
+                    ArrayAdapter<String> adapter = (ArrayAdapter<String>) listView_Codes.getAdapter();
+                    adapter.clear();
+                    for(int i=0; i<arrayKey.size(); i++){
+                        adapter.add(arrayKey.get(i));
+                    }
+                }
             }
             else{
                 Make_Dummy_arrayKey();      // ダミーデータ1件を登録する
@@ -128,7 +140,13 @@ public class MainActivity extends Activity {
         // automatically handle clicks on the Home/Up button, so long
         // as you specify a parent activity in AndroidManifest.xml.
         int id = item.getItemId();
-        if (id == R.id.action_settings) {
+
+        if(id == R.id.menu_read_csv){
+            if(listView_Codes != null){
+                Intent fileSelectIntent = new Intent(Intent.ACTION_GET_CONTENT);
+                fileSelectIntent.setType("file/*");
+                startActivityForResult(fileSelectIntent, REQUEST_FILE_SELECT);
+            }
             return true;
         }
         return super.onOptionsItemSelected(item);
@@ -211,8 +229,8 @@ public class MainActivity extends Activity {
 
     // コード送信選択リスト画面の表示と、コード送信
     private void Select_Send_Code() {
-        ListView listView = new ListView(this);
-        setContentView(listView);
+        listView_Codes = new ListView(this);
+        setContentView(listView_Codes);
         final ArrayAdapter<String> adapter = new ArrayAdapter<String>(this,
                 android.R.layout.simple_list_item_1);
         for(int i=0; i<arrayKey.size(); i++){
@@ -220,14 +238,25 @@ public class MainActivity extends Activity {
         }
         
         // ListViewでユーザがクリックした時の処理
-        listView.setAdapter(adapter);
-        listView.setOnItemClickListener(new AdapterView.OnItemClickListener() {
+        listView_Codes.setAdapter(adapter);
+        listView_Codes.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             @Override
             public void onItemClick(AdapterView<?> parent, View view,
                     int position, long id) {
 
+                if(time_last_sent >= System.currentTimeMillis() - 1500){
+                    // 連続送信の禁止 （1500ミリ秒）
+                    // （本来なら、送信機からのready文字列受信用スレッドを建てるべきだが、面倒なので…）
+                    return;
+                }
+                time_last_sent = System.currentTimeMillis();
+
                 if(position < arrayData.size()){
                     String [] arrayByte = arrayData.get(position).split(",");
+                    if(arrayByte.length > 170){
+                        Toast.makeText(MainActivity.this, "error:データが170Bytes以上", Toast.LENGTH_LONG).show();
+                        return;
+                    }
                     OutputStream outputStream;
                     try{
                         outputStream = mBluetoothSocket.getOutputStream();
@@ -246,12 +275,13 @@ public class MainActivity extends Activity {
                         // データはNULLで終わる
                         outputStream.write(0x00);
                         
-                        Toast.makeText(MainActivity.this, "送信完了", Toast.LENGTH_SHORT).show();
+                        Toast.makeText(MainActivity.this, arrayKey.get(position), Toast.LENGTH_SHORT).show();
                     } catch (Exception e){
-                        Toast.makeText(MainActivity.this, "OutputStreamエラー", Toast.LENGTH_LONG).show();
+                        Toast.makeText(MainActivity.this, "送信エラー", Toast.LENGTH_LONG).show();
                         return;
                     }
                 }
+                time_last_sent = System.currentTimeMillis();
             }
         });
 
@@ -261,6 +291,10 @@ public class MainActivity extends Activity {
     private void Read_csv_Data(String filepath){
         arrayKey.clear();
         arrayData.clear();
+        Init_Param_and_Timing();
+        ActionBar ab = getSupportActionBar();   // Android 2.3対応
+        String [] arrayPath = filepath.split("/");
+        ab.setTitle(arrayPath[arrayPath.length-1]);     // タイトルバーのタイトル設定（とりあえずファイル名）
 
         try{
             FileInputStream fileInputStream = new FileInputStream(filepath);
@@ -309,6 +343,10 @@ public class MainActivity extends Activity {
                     String.format("mode=%02X, PR2=%02X, CCPR1L=%02X", byteParam[0],byteParam[1],byteParam[2]),
                     Toast.LENGTH_LONG).show();
         }
+        else if(str1[0].trim().equals("@title")){
+            ActionBar ab = getSupportActionBar();   // Android 2.3対応
+            ab.setTitle(str1[1].trim());       // タイトルバーのタイトル文字列設定
+        }
     }
 
     // CSV読み込み用配列にテスト用ダミーデータを登録する
@@ -317,5 +355,18 @@ public class MainActivity extends Activity {
         arrayData.clear();
         arrayKey.add("Sample Data");
         arrayData.add("5E,A1,54,AB");       // テストデータ (NEC format)
+    }
+
+    private void Init_Param_and_Timing(){
+        // NECフォーマット時の信号Hi/Lo持続時間（マイクロ秒）をデフォルト設定
+        byteTiming[0] = (byte)90;   // スタートビット Hi 90 * 100us
+        byteTiming[1] = (byte)45;   // スタートビット Lo 45 * 100us
+        byteTiming[2] = (byte)28;   // データ 1/0 Hi 28 * 20us
+        byteTiming[3] = (byte)84;   // データ 1 Lo 84 * 20us
+        byteTiming[4] = (byte)28;   // データ 0 Lo 28 * 20us
+
+        byteParam[0] = (byte)0x01;
+        byteParam[1] = (byte)0x19;  // PWM周波数パラメータ PR2 値
+        byteParam[2] = (byte)0x08;  // PWMデューティ比パラメータ CCPR1L 値
     }
 }

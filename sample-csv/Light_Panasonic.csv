@@ -1,5 +1,6 @@
 @param = 17,25,8
 @timing = 3500,1600,540,1200,360
+@title = Panasonic Room Light
 ch1-on = 34,4A,90,B4,24,
 ch1-off = 34,4A,90,F4,64,
 ch1-white = 34,4A,9C,09,95,
